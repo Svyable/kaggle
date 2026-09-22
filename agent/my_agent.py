@@ -115,6 +115,15 @@ class MyAgent(Agent):
     def choose_action(
         self, frames: list[FrameData], latest_frame: FrameData
     ) -> GameAction:
+        if getattr(latest_frame, "full_reset", False):
+            self._reset_online_state()
+            action = GameAction.RESET
+            action.reasoning = {
+                "controller": "systemone-v0",
+                "why": "framework requested full reset",
+            }
+            return action
+
         current_grid = self._last_grid(latest_frame)
         current_sig = self._state_signature(current_grid, latest_frame.levels_completed)
 
@@ -285,6 +294,19 @@ class MyAgent(Agent):
         self.previous_grid = current_grid
         self.previous_levels = latest_frame.levels_completed
         self.previous_state_sig = current_sig
+
+    def _reset_online_state(self) -> None:
+        """Clear all within-game evidence after a framework-level full reset."""
+        self.action_stats.clear()
+        self.action_id_stats.clear()
+        self.state_action_trials.clear()
+        self.proven_noops.clear()
+        self.previous_grid = None
+        self.previous_levels = 0
+        self.previous_state_sig = None
+        self.last_decision = None
+        self.last_outcome = None
+        self.recent.clear()
 
     def _clear_transition_anchor(self, grid: Grid, levels: int, sig: str) -> None:
         self.previous_grid = grid
