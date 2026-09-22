@@ -1,0 +1,116 @@
+name: ARC E1 action-aligned collection
+
+on:
+  pull_request:
+    paths:
+      - "agent/**"
+      - "research/public_collector.py"
+      - "tests/test_public_collector.py"
+      - ".github/workflows/e1-collect.yml"
+  workflow_dispatch:
+    inputs:
+      games:
+        description: "Comma-separated game ids; blank means all public games"
+        required: false
+        default: ""
+        type: string
+      max_steps:
+        description: "Action cap per game"
+        required: true
+        default: "80"
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  collect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Prepare official starter/runtime
+        run: |
+          git clone --depth 1 https://github.com/arcprize/ARC-AGI-3-Kaggle-Starter.git /tmp/arc-starter
+          git -C /tmp/arc-starter rev-parse HEAD | tee /tmp/starter-sha.txt
+          make -C /tmp/arc-starter setup PYTHON=python
+          git -C /tmp/arc-starter/vendor/ARC-AGI-3-Agents rev-parse HEAD | tee /tmp/framework-sha.txt
+
+      - name: Resolve collection scope
+        id: scope
+        shell: bash
+        run: |
+          games="ls20,vc33"
+          max_steps="30"
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            games="${{ inputs.games }}"
+            max_steps="${{ inputs.max_steps }}"
+          fi
+          echo "games=$games" >> "$GITHUB_OUTPUT"
+          echo "max_steps=$max_steps" >> "$GITHUB_OUTPUT"
+
+      - name: Collect action-aligned trajectories
+        env:
+          PYTHONUNBUFFERED: "1"
+        run: |
+          args=(
+            -m research.public_collector
+            --output-dir /tmp/e1-public
+            --agent-file "$GITHUB_WORKSPACE/agent/my_agent.py"
+            --framework-path /tmp/arc-starter/vendor/ARC-AGI-3-Agents
+            --max-steps "${{ steps.scope.outputs.max_steps }}"
+            --starter-sha "$(cat /tmp/starter-sha.txt)"
+            --framework-sha "$(cat /tmp/framework-sha.txt)"
+          )
+          if [[ -n "${{ steps.scope.outputs.games }}" ]]; then
+            args+=(--games "${{ steps.scope.outputs.games }}")
+          fi
+          /tmp/arc-starter/.venv/bin/python "${args[@]}" | tee /tmp/e1-public.log
+
+      - name: Validate collection artifact
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          root = Path("/tmp/e1-public")
+          manifest = json.loads((root / "manifest.json").read_text())
+          rows = [
+              json.loads(line)
+              for line in (root / "transitions.jsonl").read_text().splitlines()
+              if line.strip()
+          ]
+          assert manifest["total_transitions"] == len(rows) > 0
+          assert len(manifest["games"]) >= 1
+          families = {row["game_family"] for row in rows}
+          assert families == {g["requested_game_id"] for g in manifest["games"]}
+          for row in rows:
+              assert 1 <= int(row["action_id"]) <= 7
+              if row["action_id"] == 6:
+                  assert 0 <= int(row["click_x"]) <= 63
+                  assert 0 <= int(row["click_y"]) <= 63
+              else:
+                  assert row["click_x"] is None and row["click_y"] is None
+          print(
+              f"validated {len(rows)} action-aligned transitions "
+              f"across {len(families)} game families"
+          )
+          PY
+
+      - name: Preserve trajectories and provenance
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e1-action-aligned-trajectories
+          path: |
+            /tmp/e1-public/
+            /tmp/e1-public.log
+            /tmp/starter-sha.txt
+            /tmp/framework-sha.txt
+          if-no-files-found: warn
+          retention-days: 14
