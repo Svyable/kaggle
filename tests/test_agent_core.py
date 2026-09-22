@@ -48,6 +48,7 @@ class FakeFrameData:
     state: FakeState = FakeState.NOT_FINISHED
     levels_completed: int = 0
     available_actions: list[int] = field(default_factory=lambda: [1, 2, 3, 4, 5, 6, 7])
+    full_reset: bool = False
 
 
 class FakeAgent:
@@ -127,3 +128,20 @@ def test_level_progress_updates_statistics():
     a.choose_action([], obs1)
     assert a.action_id_stats[1].progress == 1
     assert a.action_id_stats[1].trials == 1
+
+
+def test_full_reset_clears_online_memory_and_resets():
+    a = MyAgent(game_id="x")
+    a.action_id_stats[1].trials = 3
+    a.proven_noops.add(("deadbeef", DecisionKey(1)))
+    a.recent.append(DecisionKey(1))
+
+    obs = frame([[0]], state=FakeState.NOT_FINISHED, actions=[1])
+    obs.full_reset = True
+    action = a.choose_action([], obs)
+
+    assert action.name == "RESET"
+    assert not a.action_id_stats
+    assert not a.proven_noops
+    assert not a.recent
+    assert a.last_decision is None
