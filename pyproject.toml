@@ -1,0 +1,9 @@
+[project]
+name = "arc3-systemone"
+version = "0.0.1"
+description = "Action-consequence research scaffold for ARC-AGI-3"
+requires-python = ">=3.11"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
