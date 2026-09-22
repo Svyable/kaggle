@@ -26,6 +26,7 @@ class DynamicsOutput:
     p_change_logit: torch.Tensor    # [B]
     p_progress_logit: torch.Tensor  # [B]
     p_death_logit: torch.Tensor     # [B]
+    valid_mask: torch.Tensor | None = None  # [B,H,W]; False marks padding
 
 
 class ResidualBlock(nn.Module):
@@ -52,12 +53,13 @@ class ARCDecisionDynamics(nn.Module):
 
     def __init__(self, width: int = 96, depth: int = 6, cond_dim: int = 128) -> None:
         super().__init__()
-        self.color_emb = nn.Embedding(16, 24)
-        self.prev_color_emb = nn.Embedding(16, 24)
+        # ARC colors are 0..15; 16 is an internal padding token for batching.
+        self.color_emb = nn.Embedding(17, 24)
+        self.prev_color_emb = nn.Embedding(17, 24)
         self.x_emb = nn.Embedding(64, 8)
         self.y_emb = nn.Embedding(64, 8)
 
-        in_channels = 24 + 24 + 8 + 8 + 1
+        in_channels = 24 + 24 + 8 + 8 + 2  # changed + valid-cell channels
         self.stem = nn.Conv2d(in_channels, width, 3, padding=1)
 
         self.action_emb = nn.Embedding(8, 48)  # ids 0..7; RESET is normally excluded
@@ -79,8 +81,8 @@ class ARCDecisionDynamics(nn.Module):
 
     def forward(
         self,
-        current: torch.Tensor,   # [B,H,W], int64 in 0..15
-        previous: torch.Tensor,  # [B,H,W], int64 in 0..15
+        current: torch.Tensor,   # [B,H,W], int64 in 0..16 (16=padding)
+        previous: torch.Tensor,  # [B,H,W], int64 in 0..16 (16=padding)
         action_id: torch.Tensor, # [B], 1..7
         click_x: torch.Tensor | None = None,
         click_y: torch.Tensor | None = None,
@@ -90,9 +92,19 @@ class ARCDecisionDynamics(nn.Module):
         if h > 64 or w > 64:
             raise ValueError("ARC grids must be <=64x64")
 
+        if bool(((current < 0) | (current > 16)).any()) or bool(
+            ((previous < 0) | (previous > 16)).any()
+        ):
+            raise ValueError("grid tensors must contain ARC colors 0..15 or padding token 16")
+
         yy = torch.arange(h, device=device)[None, :, None].expand(b, h, w)
         xx = torch.arange(w, device=device)[None, None, :].expand(b, h, w)
-        changed = (current != previous).float().unsqueeze(-1)
+        valid_mask = current != 16
+        previous_valid = previous != 16
+        changed = (
+            (current != previous) & valid_mask & previous_valid
+        ).float().unsqueeze(-1)
+        valid_feature = valid_mask.float().unsqueeze(-1)
 
         features = torch.cat(
             [
@@ -101,6 +113,7 @@ class ARCDecisionDynamics(nn.Module):
                 self.x_emb(xx),
                 self.y_emb(yy),
                 changed,
+                valid_feature,
             ],
             dim=-1,
         ).permute(0, 3, 1, 2)
@@ -120,13 +133,16 @@ class ARCDecisionDynamics(nn.Module):
             x = block(x, cond)
 
         next_logits = self.next_grid_head(x)
-        pooled = x.mean(dim=(-2, -1))
+        valid_2d = valid_mask.float().unsqueeze(1)
+        denom = valid_2d.sum(dim=(-2, -1)).clamp_min(1.0)
+        pooled = (x * valid_2d).sum(dim=(-2, -1)) / denom
         scalar = self.global_head(torch.cat([pooled, cond], dim=-1))
         return DynamicsOutput(
             next_grid_logits=next_logits,
             p_change_logit=scalar[:, 0],
             p_progress_logit=scalar[:, 1],
             p_death_logit=scalar[:, 2],
+            valid_mask=valid_mask,
         )
 
 
@@ -138,7 +154,9 @@ def training_loss(
     died: torch.Tensor,
 ) -> tuple[torch.Tensor, dict[str, torch.Tensor]]:
     """Dense world-model loss + proper probabilistic losses for decision heads."""
-    grid_ce = F.cross_entropy(out.next_grid_logits, next_grid.long())
+    # Padding token 16 is deliberately outside the 16-class output space and
+    # is ignored rather than rewarded as static background.
+    grid_ce = F.cross_entropy(out.next_grid_logits, next_grid.long(), ignore_index=16)
     change_bce = F.binary_cross_entropy_with_logits(out.p_change_logit, changed.float())
     progress_bce = F.binary_cross_entropy_with_logits(out.p_progress_logit, progressed.float())
     death_bce = F.binary_cross_entropy_with_logits(out.p_death_logit, died.float())
@@ -162,7 +180,14 @@ def decision_utility(out: DynamicsOutput) -> torch.Tensor:
 
     # Predictive entropy of next-cell distributions is a useful uncertainty proxy.
     probs = out.next_grid_logits.softmax(dim=1)
-    entropy = -(probs * probs.clamp_min(1e-8).log()).sum(dim=1).mean(dim=(-2, -1))
+    per_cell_entropy = -(probs * probs.clamp_min(1e-8).log()).sum(dim=1)
+    if out.valid_mask is not None:
+        mask = out.valid_mask.float()
+        entropy = (per_cell_entropy * mask).sum(dim=(-2, -1)) / mask.sum(
+            dim=(-2, -1)
+        ).clamp_min(1.0)
+    else:
+        entropy = per_cell_entropy.mean(dim=(-2, -1))
     entropy = entropy / torch.log(torch.tensor(16.0, device=entropy.device))
 
     # High progress and safe change are good; uncertainty can justify exploration,
