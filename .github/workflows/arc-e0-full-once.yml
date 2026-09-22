@@ -30,6 +30,9 @@ jobs:
         run: |
           set -o pipefail
           .venv/bin/python scripts/play_local.py --max-steps 80 2>&1 | tee /tmp/e0-full.log
+      - name: Validate full-run behavior
+        run: python "$GITHUB_WORKSPACE/scripts/validate_e0_log.py" /tmp/e0-full.log
+
       - name: Preserve full-run evidence
         if: always()
         uses: actions/upload-artifact@v4
