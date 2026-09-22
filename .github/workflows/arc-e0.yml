@@ -79,6 +79,14 @@ jobs:
           set -o pipefail
           .venv/bin/python scripts/play_local.py --max-steps 80 2>&1 | tee /tmp/e0-run.log
 
+      - name: Validate smoke behavior
+        if: steps.scope.outputs.scope == 'smoke'
+        run: python scripts/validate_e0_log.py /tmp/e0-run.log --expected-games 2
+
+      - name: Validate full behavior
+        if: steps.scope.outputs.scope == 'full'
+        run: python scripts/validate_e0_log.py /tmp/e0-run.log
+
       - name: Preserve integration evidence
         if: always()
         uses: actions/upload-artifact@v4
