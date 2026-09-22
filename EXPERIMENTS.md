@@ -26,9 +26,13 @@ Use `agent/my_agent.py` unchanged in the official Kaggle starter.
 Pass conditions:
 - no exceptions on every locally available environment;
 - no illegal ACTION6 coordinates;
+- every played game executes at least one non-RESET action after initialization;
 - proven exact-state no-ops are not repeated;
 - identical starting observations produce identical first decisions;
+- `full_reset` clears stale evidence without causing a RESET loop;
 - logs contain the top candidate scores and the observed consequence of the previous action.
+
+The official-starter CI validates behavior from the run log; a process that merely reaches MAX_ACTIONS while looping on RESET is a failure.
 
 This establishes the plumbing. It is not expected to be a strong solver.
 

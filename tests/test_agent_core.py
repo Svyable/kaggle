@@ -130,7 +130,7 @@ def test_level_progress_updates_statistics():
     assert a.action_id_stats[1].trials == 1
 
 
-def test_full_reset_clears_online_memory_and_resets():
+def test_full_reset_clears_memory_but_does_not_loop_reset():
     a = MyAgent(game_id="x")
     a.action_id_stats[1].trials = 3
     a.proven_noops.add(("deadbeef", DecisionKey(1)))
@@ -140,8 +140,17 @@ def test_full_reset_clears_online_memory_and_resets():
     obs.full_reset = True
     action = a.choose_action([], obs)
 
-    assert action.name == "RESET"
-    assert not a.action_id_stats
+    assert action.value == 1
     assert not a.proven_noops
-    assert not a.recent
-    assert a.last_decision is None
+    assert list(a.recent) == [DecisionKey(1)]
+    assert a.last_decision == DecisionKey(1)
+
+
+def test_initial_reset_response_advances_to_environment_action():
+    a = MyAgent(game_id="x")
+    initial = frame([[0]], state=FakeState.NOT_PLAYED, actions=[1])
+    assert a.choose_action([], initial).name == "RESET"
+
+    after_reset = frame([[0]], state=FakeState.NOT_FINISHED, actions=[1])
+    after_reset.full_reset = True
+    assert a.choose_action([], after_reset).value == 1
