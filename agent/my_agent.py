@@ -19,8 +19,7 @@ from __future__ import annotations
 import hashlib
 import math
 from collections import Counter, defaultdict, deque
-from dataclasses import dataclass
-from typing import Any, Iterable, Optional
+from typing import Any, Iterable, NamedTuple, Optional
 
 from arcengine import FrameData, GameAction, GameState
 from agents.agent import Agent
@@ -29,20 +28,28 @@ from agents.agent import Agent
 Grid = list[list[int]]
 
 
-@dataclass(frozen=True)
-class DecisionKey:
+class DecisionKey(NamedTuple):
     action_id: int
     x: Optional[int] = None
     y: Optional[int] = None
 
 
-@dataclass
 class ConsequenceStats:
-    trials: int = 0
-    changed: int = 0
-    progress: int = 0
-    deaths: int = 0
-    total_changed_cells: int = 0
+    __slots__ = ("trials", "changed", "progress", "deaths", "total_changed_cells")
+
+    def __init__(
+        self,
+        trials: int = 0,
+        changed: int = 0,
+        progress: int = 0,
+        deaths: int = 0,
+        total_changed_cells: int = 0,
+    ) -> None:
+        self.trials = trials
+        self.changed = changed
+        self.progress = progress
+        self.deaths = deaths
+        self.total_changed_cells = total_changed_cells
 
     def update(self, *, changed_cells: int, progressed: bool, died: bool) -> None:
         self.trials += 1
@@ -70,8 +77,7 @@ class ConsequenceStats:
         return self.total_changed_cells / max(1, self.trials)
 
 
-@dataclass
-class Outcome:
+class Outcome(NamedTuple):
     state_sig: str
     changed_cells: int
     progressed: bool

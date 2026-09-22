@@ -1,0 +1,58 @@
+name: ARC E0 official-starter integration
+
+on:
+  pull_request:
+    paths:
+      - "agent/**"
+      - ".github/workflows/arc-e0.yml"
+  workflow_dispatch:
+  schedule:
+    - cron: "17 9 * * *"
+
+permissions:
+  contents: read
+
+jobs:
+  verify-official-starter:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out Svyable agent
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Clone current official ARC Kaggle starter
+        run: |
+          git clone --depth 1 https://github.com/arcprize/ARC-AGI-3-Kaggle-Starter.git /tmp/arc-starter
+          git -C /tmp/arc-starter rev-parse HEAD | tee /tmp/starter-sha.txt
+
+      - name: Inject repository agent
+        run: cp agent/my_agent.py /tmp/arc-starter/agent/my_agent.py
+
+      - name: Install official starter runtime
+        working-directory: /tmp/arc-starter
+        run: make setup PYTHON=python
+
+      - name: Run official two-game verification
+        working-directory: /tmp/arc-starter
+        env:
+          PYTHONUNBUFFERED: "1"
+        run: |
+          set -o pipefail
+          make verify-local 2>&1 | tee /tmp/e0-verify.log
+
+      - name: Preserve integration evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: arc-e0-official-starter
+          path: |
+            /tmp/e0-verify.log
+            /tmp/starter-sha.txt
+          if-no-files-found: warn
+          retention-days: 14
