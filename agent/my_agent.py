@@ -121,14 +121,11 @@ class MyAgent(Agent):
     def choose_action(
         self, frames: list[FrameData], latest_frame: FrameData
     ) -> GameAction:
+        # full_reset describes the RESET that produced this observation; it is
+        # not a request to issue another RESET. Clear stale within-game evidence
+        # and continue choosing a normal action from the fresh game state.
         if getattr(latest_frame, "full_reset", False):
             self._reset_online_state()
-            action = GameAction.RESET
-            action.reasoning = {
-                "controller": "systemone-v0",
-                "why": "framework requested full reset",
-            }
-            return action
 
         current_grid = self._last_grid(latest_frame)
         current_sig = self._state_signature(current_grid, latest_frame.levels_completed)
