@@ -36,3 +36,13 @@ Controller rule:
 - only issue RESET for states such as `NOT_PLAYED` or `GAME_OVER` that actually require it.
 
 This distinction is regression-tested because treating `full_reset` as a reset request creates an infinite RESET loop that can still terminate cleanly at the action cap.
+
+
+## Recorder `action_input` mismatch
+
+As checked on 2026-09-22, the current public `ARC-AGI-3-Agents` implementation records converted `FrameData`, but `Agent._convert_raw_frame_data()` does not copy `raw.action_input` into that `FrameData`. The public recordings documentation shows `action_input` in JSONL records, so the implementation and documented schema are currently inconsistent.
+
+Research rule:
+- do not assume current framework Recorder output is action-aligned supervision;
+- for E1 data, use `research.public_collector`, which captures the chosen action and ACTION6 coordinates before stepping the environment and writes `Transition` rows directly;
+- `research.recording_converter` remains valid for recordings that actually contain the documented `action_input` field.
