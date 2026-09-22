@@ -1,0 +1,26 @@
+# Upstream compatibility
+
+This repository deliberately separates our agent logic from the ARC competition plumbing, but we still track the public upstream contracts we depend on.
+
+## Snapshot checked on 2026-09-21
+
+- Kaggle starter: https://github.com/arcprize/ARC-AGI-3-Kaggle-Starter
+  - observed main commit: `eeb1535404f321d280a8f9194bbc1d7aca5f05fc`
+  - `agent/my_agent.py` contract: class name `MyAgent`, subclass `agents.agent.Agent`, implement `is_done` and `choose_action`.
+  - starter setup currently uses Python 3.12 and `arc-agi>=0.9.6`.
+- Agent framework: https://github.com/arcprize/ARC-AGI-3-Agents
+  - observed main commit: `4743e7d0aaae0ded0d98a89a7e282e63564cd58b`
+  - `FrameData.available_actions` arrives as integer action IDs.
+  - `GameAction.from_id(id)` is part of the tested framework API.
+  - `ACTION6` is the complex coordinate action.
+  - current framework agents explicitly react to `FrameData.full_reset`.
+
+## CI policy
+
+The stubbed unit tests are intentionally fast, but they are not sufficient evidence of compatibility. The `upstream-contract` CI job installs the current public `arc-agi` runtime under Python 3.12 and verifies the API assumptions our controller relies on.
+
+If upstream changes this contract, CI should fail before we spend a Kaggle submission.
+
+## Submission-count discrepancy
+
+The public starter README currently says ARC-AGI-3 allows five official submissions per day. The competition-specific rules supplied from Kaggle state a maximum of one submission per day. Treat the **live Kaggle competition rules/UI as authoritative** and verify the active quota before spending a submission; do not encode either number into agent logic.
