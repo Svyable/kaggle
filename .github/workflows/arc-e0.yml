@@ -6,16 +6,26 @@ on:
       - "agent/**"
       - ".github/workflows/arc-e0.yml"
   workflow_dispatch:
+    inputs:
+      scope:
+        description: "Regression scope"
+        required: true
+        default: "smoke"
+        type: choice
+        options:
+          - smoke
+          - full
   schedule:
     - cron: "17 9 * * *"
+    - cron: "47 9 * * 1"
 
 permissions:
   contents: read
 
 jobs:
-  verify-official-starter:
+  official-starter:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 45
     steps:
       - name: Check out Svyable agent
         uses: actions/checkout@v4
@@ -38,21 +48,45 @@ jobs:
         working-directory: /tmp/arc-starter
         run: make setup PYTHON=python
 
-      - name: Run official two-game verification
+      - name: Resolve regression scope
+        id: scope
+        shell: bash
+        run: |
+          scope="smoke"
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" && "${{ inputs.scope }}" == "full" ]]; then
+            scope="full"
+          elif [[ "${{ github.event_name }}" == "schedule" && "${{ github.event.schedule }}" == "47 9 * * 1" ]]; then
+            scope="full"
+          fi
+          echo "scope=$scope" >> "$GITHUB_OUTPUT"
+          echo "$scope" | tee /tmp/e0-scope.txt
+
+      - name: Run official smoke verification
+        if: steps.scope.outputs.scope == 'smoke'
         working-directory: /tmp/arc-starter
         env:
           PYTHONUNBUFFERED: "1"
         run: |
           set -o pipefail
-          make verify-local 2>&1 | tee /tmp/e0-verify.log
+          make verify-local 2>&1 | tee /tmp/e0-run.log
+
+      - name: Run all public environments
+        if: steps.scope.outputs.scope == 'full'
+        working-directory: /tmp/arc-starter
+        env:
+          PYTHONUNBUFFERED: "1"
+        run: |
+          set -o pipefail
+          .venv/bin/python scripts/play_local.py --max-steps 80 2>&1 | tee /tmp/e0-run.log
 
       - name: Preserve integration evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: arc-e0-official-starter
+          name: arc-e0-official-starter-${{ steps.scope.outputs.scope }}
           path: |
-            /tmp/e0-verify.log
+            /tmp/e0-run.log
+            /tmp/e0-scope.txt
             /tmp/starter-sha.txt
           if-no-files-found: warn
           retention-days: 14
