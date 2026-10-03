@@ -7,6 +7,7 @@ This file is the permanent experiment ledger. Append results; do not rewrite his
 | E0a | 2026-09-22 | `9593e8c` | none | 25 public ARC environments | behavioral harness validity | **failed**: process completed but controller looped on RESET; 0 levels | CPU; 80-action cap/game | revise |
 | E0b | 2026-09-22 | `9780fcc` | none | 25 public ARC environments | behavioral harness validity | **pass**: 25/25 executed non-RESET actions; 2,025 actions; 1 level completed; aggregate 0.0557484568 | CPU; no model VRAM; 80-action cap/game | proceed to data/E1 |
 | D0 | 2026-09-22 | `fcd8ee5` | 22 public game families | sc25, sk48, tu93 | action-aligned data validity + persistence baseline | **pass**: 2,012 transitions; held-out persistence 99.30% cells / 0% changed cells / 12.86% exact grids | CPU collection/audit; no training VRAM | proceed to first real E1 train run |
+| E1a | 2026-09-22 | `ada0ef0` | 22 public game families | sc25, sk48, tu93 | next-state vs persistence | **fail**: 22.01% changed cells, but 0% exact grids and 98.40% cells vs persistence 0% / 12.86% / 99.30% | CPU; width32 depth2; 6 epochs | revise loss toward sparse edits; do not start Laya |
 
 ## Result template
 
@@ -62,3 +63,20 @@ This file is the permanent experiment ledger. Append results; do not rewrite his
 - **Result:** **pass**. The full artifact passed the repository's actual E1 JSONL loader and deterministic family-split audit with no train/validation family leakage.
 - **Decision:** proceed to the first real E1 training run. This is a data/plumbing result, not evidence that the learned world model beats persistence.
 - **Artifacts:** full collection https://github.com/Svyable/kaggle/actions/runs/35721678147 ; E1 loader/audit https://github.com/Svyable/kaggle/actions/runs/35721938631
+
+
+### E1a — first real grid-native dynamics training run
+
+- **Hypothesis:** A small action-conditioned grid model trained with dense next-grid cross-entropy can beat persistence on held-out next-state prediction.
+- **Commit:** `ada0ef0f455c4a197e54e9ddf5569fe231c8e954`
+- **Data / split:** D0; 1,771 train transitions from 22 families; 241 held-out transitions from `sc25`, `sk48`, `tu93`.
+- **Configuration:** width 32; depth 2; conditioning dim 64; 6 epochs; batch 32; AdamW 3e-4; seed 7; CPU.
+- **Baseline:** held-out persistence: cell accuracy 0.9929867819631742; changed-cell accuracy 0.0; exact-grid accuracy 0.12863070539419086.
+- **Model result:** validation loss 0.3608991142625136; cell accuracy 0.9840234780212656; changed-cell accuracy 0.22013577928643652; exact-grid accuracy 0.0.
+- **Scalar heads:** change Brier 0.08379098027944565 / ECE 0.07751662284135818; death Brier 0.008286096155643463 / ECE 0.006728747859597206. Validation has no positive progress examples, so the tiny progress Brier/ECE does not demonstrate useful progress prediction.
+- **Edit diagnostic:** held-out target has 6,923 changed cells. The model predicted 12,825 cells as edits; 10,372 were false edits. Edit-location precision was 0.19126705653021442; edit-location recall 0.35432615917954646; 1,524 changed cells were predicted with the correct new color (0.22013577928643652 recall).
+- **Training behavior:** changed-cell accuracy was already 0.24656940632673696 after epoch 1 while exact-grid accuracy stayed 0.0 at every epoch; optimizing the existing validation loss did not solve false edits.
+- **Result:** **fail** for the provisional next-state gate. The model learned nontrivial dynamics that persistence cannot (22% correct changed cells), but it over-edited unchanged cells badly enough to lose whole-grid fidelity and overall cell accuracy.
+- **Failure analysis:** only about 0.71% of D0 grid cells change even though most transitions contain some change. Dense CE therefore mixes a sparse edit-prediction problem with a dominant identity-copy problem. The observed error pattern is specifically low edit precision, not absence of learned dynamics.
+- **Decision:** keep the same split and model size for E1b. Change the objective first: explicitly supervise sparse per-cell change and penalize unnecessary edits while retaining next-color CE. Do not increase capacity or begin E2/Laya yet.
+- **Artifacts:** training run https://github.com/Svyable/kaggle/actions/runs/35722484655 ; artifact `e1-first-real-train`.
